@@ -193,7 +193,7 @@ async function createMcpServer() {
       prompt:z.string().min(1),
       aspect_ratio:z.enum(["16:9","4:3","1:1","3:4","9:16","21:9"]).optional().default("9:16"),
       resolution:z.enum(["480p","720p","1080p"]).optional().default("720p"),
-      duration_seconds:z.number().int().min(4).max(15).optional().default(8),
+      duration_seconds:z.number().int().min(4).max(30).optional().default(8),
       generate_audio:z.boolean().optional().default(true),
       model:z.string().optional().describe("Override the Seedance model id."),
       reference_image_urls:z.array(z.string().url()).max(4).optional().default([])
@@ -210,7 +210,7 @@ async function createMcpServer() {
       scenes:z.array(z.string().min(1)).min(1).max(10),
       aspect_ratio:z.enum(["16:9","4:3","1:1","3:4","9:16","21:9"]).optional().default("9:16"),
       resolution:z.enum(["480p","720p","1080p"]).optional().default("720p"),
-      duration_seconds:z.number().int().min(4).max(15).optional().default(8),
+      duration_seconds:z.number().int().min(4).max(30).optional().default(8),
       generate_audio:z.boolean().optional().default(true),
       reference_image_urls:z.array(z.string().url()).max(4).optional().default([])
     }
