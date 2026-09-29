@@ -202,6 +202,26 @@ async function createMcpServer() {
     try{const t=await startSeedance(args);const res={success:true,status:"processing",task_id:t.id};return {content:[{type:"text",text:JSON.stringify(res)}],structuredContent:res};}
     catch(error){return {isError:true,content:[{type:"text",text:JSON.stringify({success:false,error:error.message,details:error.details||null})}]};}
   });
+  server.registerTool("generate_series_seedance",{
+    title:"Generate a video series with Seedance",
+    description:"Start several Seedance videos at once (one per scene) with a shared style and shared reference images (e.g. the mascot) so a series stays consistent. Returns one task_id per scene; poll each with check_seedance_video.",
+    inputSchema:{
+      style:z.string().optional().default("").describe("Shared visual/voice style prepended to every scene prompt."),
+      scenes:z.array(z.string().min(1)).min(1).max(10),
+      aspect_ratio:z.enum(["16:9","4:3","1:1","3:4","9:16","21:9"]).optional().default("9:16"),
+      resolution:z.enum(["480p","720p","1080p"]).optional().default("720p"),
+      duration_seconds:z.number().int().min(4).max(15).optional().default(8),
+      generate_audio:z.boolean().optional().default(true),
+      reference_image_urls:z.array(z.string().url()).max(4).optional().default([])
+    }
+  },async({style,scenes,...rest})=>{
+    const out=[];
+    for(let i=0;i<scenes.length;i++){
+      try{const t=await startSeedance({...rest,prompt:(style?style+"\n":"")+scenes[i]});out.push({scene:i+1,task_id:t.id,status:"processing"});}
+      catch(error){out.push({scene:i+1,error:error.message,details:error.details||null});}
+    }
+    return {content:[{type:"text",text:JSON.stringify({success:out.every(o=>o.task_id),scenes:out})}]};
+  });
   server.registerTool("check_seedance_video",{
     title:"Check Seedance video generation",
     description:"Check a Seedance task; returns video_url when completed.",
