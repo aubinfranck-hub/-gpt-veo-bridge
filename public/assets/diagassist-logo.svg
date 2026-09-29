@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">DiagAssist</title>
+  <desc id="desc">DiagAssist automotive diagnostics logo placeholder</desc>
+  <rect width="1200" height="360" rx="48" fill="#0b1220"/>
+  <g transform="translate(55 55)">
+    <rect width="250" height="250" rx="56" fill="#1d4ed8"/>
+    <path d="M74 172V82h57c40 0 68 17 68 45s-28 45-68 45H74Zm39-30h17c22 0 31-5 31-15s-9-15-31-15h-17v30Z" fill="white"/>
+    <circle cx="182" cy="178" r="12" fill="#60a5fa"/>
+  </g>
+  <text x="350" y="190" font-family="Arial, Helvetica, sans-serif" font-size="112" font-weight="700" fill="white">DiagAssist</text>
+  <text x="356" y="250" font-family="Arial, Helvetica, sans-serif" font-size="30" letter-spacing="5" fill="#93c5fd">AI AUTOMOTIVE DIAGNOSTICS</text>
+</svg>
