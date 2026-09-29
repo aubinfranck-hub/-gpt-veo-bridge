@@ -112,6 +112,29 @@ function buildDownloadUrl(operationName) {
   return `https://gpt-veo-bridge.onrender.com/download-video?operation=${encodeURIComponent(operationName)}&expires=${expiresAt}&token=${token}`;
 }
 
+
+// ---- Seedance (BytePlus ModelArk) ----
+const ARK_API_KEY = process.env.ARK_API_KEY;
+const ARK_BASE_URL = process.env.ARK_BASE_URL || "https://ark.ap-southeast.bytepluses.com/api/v3";
+const SEEDANCE_MODEL = process.env.SEEDANCE_MODEL || "dreamina-seedance-2-0-260128";
+async function arkFetch(path, options = {}) {
+  if (!ARK_API_KEY) throw new Error("ARK_API_KEY is not configured on the server");
+  const r = await fetch(`${ARK_BASE_URL}${path}`, { ...options, headers: { "Content-Type": "application/json", Authorization: `Bearer ${ARK_API_KEY}`, ...(options.headers || {}) } });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data?.error?.message || `Seedance API error ${r.status}`); e.status = r.status; e.details = data; throw e; }
+  return data;
+}
+async function startSeedance({ prompt, model, aspect_ratio = "9:16", resolution = "720p", duration_seconds = 8, generate_audio = true, reference_image_urls = [] }) {
+  const content = [{ type: "text", text: prompt }];
+  for (const url of reference_image_urls) content.push({ type: "image_url", image_url: { url }, role: "reference_image" });
+  return arkFetch("/contents/generations/tasks", { method: "POST", body: JSON.stringify({ model: model || SEEDANCE_MODEL, content, ratio: aspect_ratio, resolution, duration: duration_seconds, generate_audio, watermark: false }) });
+}
+function seedanceResult(t) {
+  if (t.status === "succeeded") return { success: true, status: "completed", task_id: t.id, video_url: t.content?.video_url };
+  if (t.status === "failed" || t.status === "cancelled" || t.status === "expired") return { success: false, status: t.status, task_id: t.id, error: t.error || null };
+  return { success: true, status: "processing", task_id: t.id };
+}
+
 async function createMcpServer() {
   const server=new McpServer({name:"gpt-veo-bridge",version:"2.1.0"},{capabilities:{tools:{}}});
   server.registerTool("list_visual_assets",{
@@ -163,11 +186,35 @@ async function createMcpServer() {
       return {content:[{type:"text",text:JSON.stringify(result)}],structuredContent:result};
     }catch(error){return {isError:true,content:[{type:"text",text:JSON.stringify({success:false,error:error.message})}]};}
   });
+  server.registerTool("generate_video_seedance",{
+    title:"Generate a Seedance video",
+    description:"Generate a video (with audio) using ByteDance Seedance via BytePlus ModelArk. Returns a task_id; poll with check_seedance_video.",
+    inputSchema:{
+      prompt:z.string().min(1),
+      aspect_ratio:z.enum(["16:9","4:3","1:1","3:4","9:16","21:9"]).optional().default("9:16"),
+      resolution:z.enum(["480p","720p","1080p"]).optional().default("720p"),
+      duration_seconds:z.number().int().min(4).max(15).optional().default(8),
+      generate_audio:z.boolean().optional().default(true),
+      model:z.string().optional().describe("Override the Seedance model id."),
+      reference_image_urls:z.array(z.string().url()).max(4).optional().default([])
+    }
+  },async(args)=>{
+    try{const t=await startSeedance(args);const res={success:true,status:"processing",task_id:t.id};return {content:[{type:"text",text:JSON.stringify(res)}],structuredContent:res};}
+    catch(error){return {isError:true,content:[{type:"text",text:JSON.stringify({success:false,error:error.message,details:error.details||null})}]};}
+  });
+  server.registerTool("check_seedance_video",{
+    title:"Check Seedance video generation",
+    description:"Check a Seedance task; returns video_url when completed.",
+    inputSchema:{task_id:z.string().min(1)}
+  },async({task_id})=>{
+    try{const res=seedanceResult(await arkFetch(`/contents/generations/tasks/${encodeURIComponent(task_id)}`));return {isError:!res.success,content:[{type:"text",text:JSON.stringify(res)}]};}
+    catch(error){return {isError:true,content:[{type:"text",text:JSON.stringify({success:false,error:error.message,details:error.details||null})}]};}
+  });
   return server;
 }
 
 app.get("/",(req,res)=>res.json({service:"GPT Veo Bridge",status:"online",version:"2.1.0",mcp:"/mcp"}));
-app.get("/health",(req,res)=>res.json({status:"ok",google_api_configured:Boolean(GOOGLE_API_KEY),bridge_auth_configured:Boolean(BRIDGE_API_KEY),mcp_auth_configured:Boolean(MCP_API_KEY),diagassist_mascot_configured:true,diagassist_features_configured:Boolean(FEATURES_B64)}));
+app.get("/health",(req,res)=>res.json({status:"ok",google_api_configured:Boolean(GOOGLE_API_KEY),bridge_auth_configured:Boolean(BRIDGE_API_KEY),mcp_auth_configured:Boolean(MCP_API_KEY),seedance_configured:Boolean(ARK_API_KEY),diagassist_mascot_configured:true,diagassist_features_configured:Boolean(FEATURES_B64)}));
 app.post("/generate-video",checkAuth,async(req,res)=>{try{res.json({success:true,status:"processing",operation:await startVeoGeneration(req.body)});}catch(error){res.status(error.status||500).json({error:error.message,details:error.details||null});}});
 app.get("/download-video",async(req,res)=>{
   try{
