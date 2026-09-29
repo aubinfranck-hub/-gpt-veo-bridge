@@ -6,6 +6,7 @@ import { z } from "zod";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
+app.use("/assets", express.static("public/assets", { maxAge: "1h", fallthrough: true }));
 
 const PORT = process.env.PORT || 10000;
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
@@ -105,6 +106,24 @@ async function createMcpServer() {
   const server = new McpServer(
     { name: "gpt-veo-bridge", version: "2.0.0" },
     { capabilities: { tools: {} } }
+  );
+
+  server.registerTool(
+    "list_visual_assets",
+    {
+      title: "List visual assets",
+      description: "List public image and logo assets available as visual references for Veo.",
+      inputSchema: {}
+    },
+    async () => {
+      const assets = [
+        { name: "diagassist-logo.svg", url: "https://gpt-veo-bridge.onrender.com/assets/diagassist-logo.svg" }
+      ];
+      return {
+        content: [{ type: "text", text: JSON.stringify({ assets }) }],
+        structuredContent: { assets }
+      };
+    }
   );
 
   server.registerTool(
