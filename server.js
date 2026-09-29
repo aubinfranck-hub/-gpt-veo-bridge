@@ -12,6 +12,8 @@ const PORT = process.env.PORT || 10000;
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const BRIDGE_API_KEY = process.env.BRIDGE_API_KEY;
 const MCP_API_KEY = process.env.MCP_API_KEY;
+// Optional extra key for Claude (can be removed from Render at any time).
+const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
 const MASCOT_B64 = process.env.DIAGASSIST_MASCOT_B64 || "";
 const FEATURES_B64 = process.env.DIAGASSIST_FEATURES_B64 || "";
 
@@ -19,11 +21,11 @@ function auth(req, key) {
   return Boolean(key) && req.headers.authorization === `Bearer ${key}`;
 }
 function checkAuth(req, res, next) {
-  if (!auth(req, BRIDGE_API_KEY)) return res.status(401).json({ error: "Unauthorized" });
+  if (!auth(req, BRIDGE_API_KEY) && !auth(req, CLAUDE_API_KEY)) return res.status(401).json({ error: "Unauthorized" });
   next();
 }
 function checkMcpAuth(req, res, next) {
-  if (!auth(req, MCP_API_KEY)) return res.status(401).json({ error: "Unauthorized" });
+  if (!auth(req, MCP_API_KEY) && !auth(req, CLAUDE_API_KEY)) return res.status(401).json({ error: "Unauthorized" });
   next();
 }
 function signedDownloadToken(operationName, expiresAt) {
@@ -128,6 +130,7 @@ async function createMcpServer() {
       aspect_ratio:z.enum(["16:9","9:16"]).optional().default("16:9"),
       resolution:z.enum(["720p","1080p","4k"]).optional().default("720p"),
       duration_seconds:z.union([z.literal(4),z.literal(6),z.literal(8)]).optional().default(8).describe("4, 6 or 8 seconds. Forced to 8 for 1080p/4k or when reference images are used."),
+      model:z.enum(["veo-3.1-generate-preview","veo-3.1-fast-generate-preview"]).optional().default("veo-3.1-generate-preview").describe("Fast model is cheaper."),
       reference_image_urls:z.array(z.string().url()).max(3).optional().default([])
     }
   },async(args)=>{
