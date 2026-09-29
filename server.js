@@ -39,14 +39,38 @@ function verifyDownloadToken(operationName, expiresAt, token) {
   return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(token));
 }
 
-async function startVeoGeneration({ prompt, model = "veo-3.1-generate-preview", aspect_ratio = "16:9", resolution = "720p", duration_seconds = 8 }) {
+async function startVeoGeneration({ prompt, model = "veo-3.1-generate-preview", aspect_ratio = "16:9", resolution = "720p", duration_seconds = 8, reference_image_urls = [] }) {
+  if (!Array.isArray(reference_image_urls) || reference_image_urls.length > 3) {
+    throw new Error("reference_image_urls must contain at most 3 public HTTPS image URLs");
+  }
+  if (reference_image_urls.length > 0 && duration_seconds !== 8) {
+    duration_seconds = 8;
+  }
   if (!GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY is not configured on the server");
   if (!prompt || typeof prompt !== "string") throw new Error("prompt is required");
 
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:predictLongRunning`;
 
+  const instance = { prompt };
+  if (reference_image_urls.length > 0) {
+    const refs = [];
+    for (const imageUrl of reference_image_urls) {
+      if (!/^https:\/\//i.test(imageUrl)) throw new Error("Reference images must use HTTPS URLs");
+      const imageResponse = await fetch(imageUrl);
+      if (!imageResponse.ok) throw new Error(`Unable to fetch reference image: ${imageUrl}`);
+      const contentType = (imageResponse.headers.get("content-type") || "image/png").split(";")[0];
+      if (!contentType.startsWith("image/")) throw new Error(`Reference URL is not an image: ${imageUrl}`);
+      const bytes = Buffer.from(await imageResponse.arrayBuffer());
+      refs.push({
+        image: { inlineData: { mimeType: contentType, data: bytes.toString("base64") } },
+        referenceType: "asset"
+      });
+    }
+    instance.referenceImages = refs;
+  }
+
   const body = {
-    instances: [{ prompt }],
+    instances: [instance],
     parameters: {
       aspectRatio: aspect_ratio,
       resolution,
@@ -135,12 +159,13 @@ async function createMcpServer() {
         prompt: z.string().min(1).describe("Detailed video prompt"),
         aspect_ratio: z.enum(["16:9", "9:16"]).optional().default("16:9"),
         resolution: z.enum(["720p", "1080p", "4k"]).optional().default("720p"),
-        duration_seconds: z.number().int().min(4).max(8).optional().default(8)
+        duration_seconds: z.number().int().min(4).max(8).optional().default(8),
+        reference_image_urls: z.array(z.string().url()).max(3).optional().default([]).describe("Up to 3 public HTTPS image URLs used as Veo 3.1 reference images, for example the DiagAssist logo.")
       }
     },
-    async ({ prompt, aspect_ratio, resolution, duration_seconds }) => {
+    async ({ prompt, aspect_ratio, resolution, duration_seconds, reference_image_urls }) => {
       try {
-        const operation = await startVeoGeneration({ prompt, aspect_ratio, resolution, duration_seconds });
+        const operation = await startVeoGeneration({ prompt, aspect_ratio, resolution, duration_seconds, reference_image_urls });
         const operationName = operation?.name;
         if (!operationName) throw new Error("Google did not return an operation name");
 
