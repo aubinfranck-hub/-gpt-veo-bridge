@@ -1,6 +1,6 @@
 {
   "name": "gpt-veo-bridge",
-  "version": "2.0.0",
+  "version": "2.2.0",
   "description": "Private ChatGPT plugin bridge to Google Veo",
   "type": "module",
   "main": "server.js",
@@ -8,6 +8,7 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@google/genai": "^1.67.0",
     "@modelcontextprotocol/sdk": "^1.30.1",
     "express": "^5.1.0",
     "zod": "^4.1.5"
