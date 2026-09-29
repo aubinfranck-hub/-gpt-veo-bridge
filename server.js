@@ -31,13 +31,15 @@ function signedDownloadToken(operationName, expiresAt) {
 }
 function verifyDownloadToken(operationName, expiresAt, token) {
   if (!operationName || !expiresAt || !token || Date.now() > Number(expiresAt)) return false;
-  const expected = signedDownloadToken(operationName, expiresAt);
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(token));
+  const expected = Buffer.from(signedDownloadToken(operationName, expiresAt));
+  const given = Buffer.from(String(token));
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
 }
 
+// Veo only accepts raster images (PNG/JPEG/WebP) as references: no SVG.
 const assets = [
-  { name: "diagassist-logo.svg", url: "https://gpt-veo-bridge.onrender.com/assets/diagassist-logo.svg", type: "logo" },
-  { name: "diagassist-mascot.jpg", url: "https://gpt-veo-bridge.onrender.com/assets/diagassist-mascot.jpg", type: "mascot" },
+  { name: "diagassist-logo.png", url: "https://gpt-veo-bridge.onrender.com/assets/diagassist-logo.png", type: "logo" },
+  { name: "diagassist-mascot.png", url: "https://gpt-veo-bridge.onrender.com/assets/diagassist-mascot.png", type: "mascot" },
   { name: "diagassist-features.jpg", url: "https://gpt-veo-bridge.onrender.com/assets/diagassist-features.jpg", type: "features" }
 ];
 
@@ -47,12 +49,15 @@ function serveEnvImage(req, res, b64, type) {
   res.setHeader("Cache-Control", "public, max-age=3600");
   res.send(Buffer.from(b64, "base64"));
 }
-app.get("/assets/diagassist-mascot.jpg", (req,res) => serveEnvImage(req,res,MASCOT_B64,"image/jpeg"));
 app.get("/assets/diagassist-features.jpg", (req,res) => serveEnvImage(req,res,FEATURES_B64,"image/jpeg"));
 
+const ALLOWED_REF_TYPES = ["image/png", "image/jpeg", "image/webp"];
 async function startVeoGeneration({ prompt, model="veo-3.1-generate-preview", aspect_ratio="16:9", resolution="720p", duration_seconds=8, reference_image_urls=[] }) {
   if (!Array.isArray(reference_image_urls) || reference_image_urls.length > 3) throw new Error("reference_image_urls must contain at most 3 public HTTPS image URLs");
-  if (reference_image_urls.length && duration_seconds !== 8) duration_seconds = 8;
+  duration_seconds = Number(duration_seconds);
+  // Veo 3.1: only 4, 6 or 8 s; 1080p/4k and reference images require 8 s.
+  if (![4, 6, 8].includes(duration_seconds)) duration_seconds = 8;
+  if (reference_image_urls.length || resolution !== "720p") duration_seconds = 8;
   if (!GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY is not configured on the server");
   if (!prompt || typeof prompt !== "string") throw new Error("prompt is required");
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:predictLongRunning`;
@@ -64,7 +69,7 @@ async function startVeoGeneration({ prompt, model="veo-3.1-generate-preview", as
       const r = await fetch(imageUrl);
       if (!r.ok) throw new Error(`Unable to fetch reference image: ${imageUrl}`);
       const mimeType = (r.headers.get("content-type") || "image/jpeg").split(";")[0];
-      if (!mimeType.startsWith("image/")) throw new Error(`Reference URL is not an image: ${imageUrl}`);
+      if (!ALLOWED_REF_TYPES.includes(mimeType)) throw new Error(`Reference image must be PNG, JPEG or WebP (got ${mimeType}): ${imageUrl}`);
       const data = Buffer.from(await r.arrayBuffer()).toString("base64");
       instance.referenceImages.push({ image:{inlineData:{mimeType,data}}, referenceType:"asset" });
     }
@@ -101,7 +106,7 @@ async function createMcpServer() {
     description:"List the DiagAssist logo, mascot and features visual available as public HTTPS references for Veo.",
     inputSchema:{}
   },async()=>{
-    const available=assets.filter(a=>a.type==="logo" || (a.type==="mascot" && MASCOT_B64) || (a.type==="features" && FEATURES_B64));
+    const available=assets.filter(a=>a.type!=="features" || FEATURES_B64);
     return {content:[{type:"text",text:JSON.stringify({assets:available})}],structuredContent:{assets:available}};
   });
   server.registerTool("generate_video",{
@@ -111,7 +116,7 @@ async function createMcpServer() {
       prompt:z.string().min(1),
       aspect_ratio:z.enum(["16:9","9:16"]).optional().default("16:9"),
       resolution:z.enum(["720p","1080p","4k"]).optional().default("720p"),
-      duration_seconds:z.number().int().min(4).max(8).optional().default(8),
+      duration_seconds:z.union([z.literal(4),z.literal(6),z.literal(8)]).optional().default(8).describe("4, 6 or 8 seconds. Forced to 8 for 1080p/4k or when reference images are used."),
       reference_image_urls:z.array(z.string().url()).max(3).optional().default([])
     }
   },async(args)=>{
@@ -148,7 +153,7 @@ async function createMcpServer() {
 }
 
 app.get("/",(req,res)=>res.json({service:"GPT Veo Bridge",status:"online",version:"2.1.0",mcp:"/mcp"}));
-app.get("/health",(req,res)=>res.json({status:"ok",google_api_configured:Boolean(GOOGLE_API_KEY),bridge_auth_configured:Boolean(BRIDGE_API_KEY),mcp_auth_configured:Boolean(MCP_API_KEY),diagassist_mascot_configured:Boolean(MASCOT_B64),diagassist_features_configured:Boolean(FEATURES_B64)}));
+app.get("/health",(req,res)=>res.json({status:"ok",google_api_configured:Boolean(GOOGLE_API_KEY),bridge_auth_configured:Boolean(BRIDGE_API_KEY),mcp_auth_configured:Boolean(MCP_API_KEY),diagassist_mascot_configured:true,diagassist_features_configured:Boolean(FEATURES_B64)}));
 app.post("/generate-video",checkAuth,async(req,res)=>{try{res.json({success:true,status:"processing",operation:await startVeoGeneration(req.body)});}catch(error){res.status(error.status||500).json({error:error.message,details:error.details||null});}});
 app.get("/download-video",async(req,res)=>{
   try{
