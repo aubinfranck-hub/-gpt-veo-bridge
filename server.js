@@ -50,41 +50,52 @@ function serveEnvImage(req, res, b64, type) {
 app.get("/assets/diagassist-mascot.jpg", (req,res) => serveEnvImage(req,res,MASCOT_B64,"image/jpeg"));
 app.get("/assets/diagassist-features.jpg", (req,res) => serveEnvImage(req,res,FEATURES_B64,"image/jpeg"));
 
-async function startVeoGeneration({ prompt, model="veo-3.1-generate-preview", aspect_ratio="16:9", resolution="720p", duration_seconds=8, reference_image_urls=[] }) {
-  if (!Array.isArray(reference_image_urls) || reference_image_urls.length > 3) throw new Error("reference_image_urls must contain at most 3 public HTTPS image URLs");
-  if (reference_image_urls.length && duration_seconds !== 8) duration_seconds = 8;
-  if (!GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY is not configured on the server");
-  if (!prompt || typeof prompt !== "string") throw new Error("prompt is required");
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:predictLongRunning`;
-  const instance = { prompt };
-  if (reference_image_urls.length) {
-    instance.referenceImages = [];
-    for (const imageUrl of reference_image_urls) {
-      if (!/^https:\/\//i.test(imageUrl)) throw new Error("Reference images must use HTTPS URLs");
-      const r = await fetch(imageUrl);
-      if (!r.ok) throw new Error(`Unable to fetch reference image: ${imageUrl}`);
-      const mimeType = (r.headers.get("content-type") || "image/jpeg").split(";")[0];
-      if (!mimeType.startsWith("image/")) throw new Error(`Reference URL is not an image: ${imageUrl}`);
-      const data = Buffer.from(await r.arrayBuffer()).toString("base64");
-      instance.referenceImages.push({ image:{inlineData:{mimeType,data}}, referenceType:"asset" });
-    }
+const { GoogleGenAI } = await import("@google/genai");
+const googleAI = GOOGLE_API_KEY ? new GoogleGenAI({ apiKey: GOOGLE_API_KEY }) : null;
+
+async function startVeoGeneration({ prompt, model = "veo-3.1-generate-preview", aspect_ratio = "16:9", resolution = "720p", duration_seconds = 8, reference_image_urls = [] }) {
+  if (!Array.isArray(reference_image_urls) || reference_image_urls.length > 3) {
+    throw new Error("reference_image_urls must contain at most 3 public HTTPS image URLs");
   }
-  const response = await fetch(endpoint,{
-    method:"POST",
-    headers:{"Content-Type":"application/json","x-goog-api-key":GOOGLE_API_KEY},
-    body:JSON.stringify({instances:[instance],parameters:{aspectRatio:aspect_ratio,resolution,durationSeconds:duration_seconds}})
+  if (reference_image_urls.length > 0 && duration_seconds !== 8) duration_seconds = 8;
+  if (!GOOGLE_API_KEY || !googleAI) throw new Error("GOOGLE_API_KEY is not configured on the server");
+  if (!prompt || typeof prompt !== "string") throw new Error("prompt is required");
+  if (!/^veo-3\.1-(generate|fast-generate)-preview$/.test(model)) {
+    throw new Error("Reference-image generation requires a Veo 3.1 model");
+  }
+
+  const referenceImages = [];
+  for (const imageUrl of reference_image_urls) {
+    if (!/^https:\/\//i.test(imageUrl)) throw new Error("Reference images must use HTTPS URLs");
+    const imageResponse = await fetch(imageUrl);
+    if (!imageResponse.ok) throw new Error(`Unable to fetch reference image: ${imageUrl}`);
+    const mimeType = (imageResponse.headers.get("content-type") || "image/jpeg").split(";")[0];
+    if (!mimeType.startsWith("image/")) throw new Error(`Reference URL is not an image: ${imageUrl}`);
+    const imageBytes = Buffer.from(await imageResponse.arrayBuffer()).toString("base64");
+    referenceImages.push({
+      image: { imageBytes, mimeType },
+      referenceType: "asset"
+    });
+  }
+
+  const operation = await googleAI.models.generateVideos({
+    model,
+    prompt,
+    config: {
+      aspectRatio: aspect_ratio,
+      resolution,
+      durationSeconds: duration_seconds,
+      ...(referenceImages.length ? { referenceImages } : {})
+    }
   });
-  const data = await response.json();
-  if (!response.ok) { const e=new Error("Google Veo API error"); e.status=response.status; e.details=data; throw e; }
-  return data;
+  return operation;
 }
+
 async function getVeoOperation(operationName) {
-  if (!GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY is not configured on the server");
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/${operationName}`,{headers:{"x-goog-api-key":GOOGLE_API_KEY}});
-  const data=await r.json();
-  if (!r.ok) { const e=new Error("Google operation API error"); e.status=r.status; e.details=data; throw e; }
-  return data;
+  if (!GOOGLE_API_KEY || !googleAI) throw new Error("GOOGLE_API_KEY is not configured on the server");
+  return await googleAI.operations.getVideosOperation({ operation: { name: operationName } });
 }
+
 function extractVideoUri(o) {
   return o?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri || o?.response?.generatedVideos?.[0]?.video?.uri || null;
 }
